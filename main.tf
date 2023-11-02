@@ -38,6 +38,46 @@ resource "aws_sqs_queue" "peoplevox_sqs_queue" {
   name = "ck-pvx-sqs"
 }
 
+# Firstly create a random generated password to use in secrets.
+ 
+resource "random_password" "password" {
+  length           = 16
+  special          = true
+  override_special = "_%@"
+}
+
+#Create secret  manager
+resource "aws_secretsmanager_secret" "peoplevox_secret" {
+  name = "ck-pvx-MySecret"
+}
+
+
+resource "aws_secretsmanager_secret_version" "peoplevox_secret_version" {
+  secret_id = aws_secretsmanager_secret.peoplevox_secret.id
+  secret_string = <<EOF
+   {
+    "username": "peoplevox",
+    "password": "${random_password.password.result}"
+   }
+EOF
+}
+
+# Importing the AWS secrets created previously using arn.
+data "aws_secretsmanager_secret" "peoplevox_secret" {
+  arn = aws_secretsmanager_secret.peoplevox_secret.arn
+}
+
+# Importing the AWS secret version created previously using arn.
+ 
+data "aws_secretsmanager_secret_version" "peoplevox_creds" {
+  secret_id = data.aws_secretsmanager_secret.peoplevox_secret.arn
+}
+ 
+
+locals {
+  db_creds = jsondecode(data.aws_secretsmanager_secret_version.peoplevox_creds.secret_string)
+}
+
 #Craete sg for RDS
 resource "aws_security_group" "peoplevox_db_instance" {
   description = "security-group-db-instance"
@@ -77,17 +117,22 @@ resource "aws_db_subnet_group" "peoplevox_sg" {
   }
 }
 
+
 #Create RDS
 resource "aws_db_instance" "peoplevox_rds" {
-  db_subnet_group_name = var.peoplevox_db_subnet_group_name
-  allocated_storage    = var.peoplevox_db_allocated_storage
-  storage_type         = "gp2"
-  engine               = "mysql"
-  engine_version       = "5.7"
-  instance_class       = var.peoplevox_db_instance_type
-  identifier           = var.peoplevox_db_identifier
-  username             = var.peoplevox_db_username
-  password             = var.peoplevox_db_password
-  parameter_group_name = "default.mysql5.7"
-  multi_az             = true
+
+ db_subnet_group_name = var.peoplevox_db_subnet_group_name
+ allocated_storage    = var.peoplevox_db_allocated_storage
+ storage_type         = "gp2"
+ engine               = "mysql"
+ engine_version       = "5.7"
+ instance_class       = var.peoplevox_db_instance_type
+ identifier           = var.peoplevox_db_identifier
+ #username = data.aws_secretsmanager_secret_version.peoplevox_secret.secret_id["PEOPLEVOX_DB_USERNAME"]
+ #password = data.aws_secretsmanager_secret_version.peoplevox_secret.secret_id["PEOPLEVOX_DB_PASSWORD"]
+ username = local.db_creds.username
+ password = local.db_creds.password
+ parameter_group_name = "default.mysql5.7"
+ multi_az             = true
 }
+
